@@ -6,7 +6,7 @@
 import os, configparser, json, OpenSSL
 
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from openpyxl import load_workbook, Workbook
 from openpyxl.utils import get_column_letter
@@ -33,11 +33,19 @@ Search_Dirs=[]
 Health_File_Name='health.log'
 ssl_access_File_Name='ssl_access_log'
 ndexec_File_Name='ndexec'
-
-
+directory_search_output=[]
+directory_search_output_analysis=[]
+es_File_Name='es.log'
+secmgr_File_Name='secmgr'
+wf_File_Name='wf.log'
+messages_file_name='messages'
 ssl_access_Search_Criteria=[]
 ndexec_Search_Criteria=[]
 Health_Search_Criteria=[]
+es_Search_Criteria=[]
+wf_Search_Criteria=[]
+secmgr_Search_Criteria=[]
+messages_Search_Criteria=[]
 Top_Largest_files=[] 
 global_search=[]
 Percentage_of_Licences_Allocated=[]
@@ -61,6 +69,7 @@ alldirs=[]
 
 
 messagesDropped_list=[]
+messageParsingErrors_list=[]
 Drops_Found=0
 Drops_Summary=""
 
@@ -77,6 +86,7 @@ exception_list=[]
 
 lic_max_util=0
 total_finds=[]
+
 
 certs='\\etc\\pki\\tls\\certs\\localhost.crt', '\\etc\\pki\\ca-trust\\source\\anchors\\fmos-root.crt', '\\etc\\pki\\tls\\certs\\fmos-admin.cer'
 display_name=''
@@ -118,8 +128,8 @@ try:
 		Top_Largest_files.append(value)
 
 
-	for key in config['global_search']:
-		value=config['global_search'][key]
+	for key in config['Global_Search']:
+		value=config['Global_Search'][key]
 		global_search.append(value)
 
 
@@ -133,8 +143,8 @@ try:
 		Days_Until_Certificates_Expire.append(value)
 
 
-	for key in config['Search_Dirs']:
-		value=config['Search_Dirs'][key]
+	for key in config['Specific_Search_Dirs']:
+		value=config['Specific_Search_Dirs'][key]
 		Search_Dirs.append(value)
 
 
@@ -143,9 +153,30 @@ try:
 		Device_Uptime=value
 
 
-	for key in config['Days_Until_Certificates_Expire']:
-		value=config['Days_Until_Certificates_Expire'][key]
-		Days_Until_Certificates_Expire.append(value)
+	for key in config['es']:
+		value=config['es'][key]
+		es_Search_Criteria.append(value)
+
+
+	for key in config['messages']:
+		value=config['messages'][key]
+		messages_Search_Criteria.append(value)
+
+
+	for key in config['secmgr']:
+		value=config['secmgr'][key]
+		secmgr_Search_Criteria.append(value)
+
+
+	for key in config['wf']:
+		value=config['wf'][key]
+		wf_Search_Criteria.append(value)
+
+
+
+	# for key in config['Days_Until_Certificates_Expire']:
+	# 	value=config['Days_Until_Certificates_Expire'][key]
+	# 	Days_Until_Certificates_Expire.append(value)
 
 		
 
@@ -162,16 +193,17 @@ except Exception as e:
 
 # Functions
 
-def directory_search(MyLoc, Dir, Log, words):
+def directory_search(MyLoc: object, Dir: object, Log: object, words: object) -> object:
 
 	#Get a list of all files in a directory
 	dir_search = os.listdir( MyLoc + Dir)
 	Files_List=[]
 
 	#Filter the list provided above to only files that contain string of interest
-	for item in dir_search:
-		if Log in item: #Pass in this string in future
-			Files_List.append(item)
+	for item_nw in dir_search:
+		#print(item_nw)
+		if Log in item_nw: #Pass in this string in future
+			Files_List.append(item_nw)
 		else:
 			pass
 
@@ -182,27 +214,27 @@ def directory_search(MyLoc, Dir, Log, words):
 			Summary_Dir_Check='WARNING -- .xy files skipped'
 			pass
 		else:
-			Summary_Dir_Check='WARNING -- .xy files skipped'
+			Summary_Dir_Check='PASS -- .xy files not skipped'
 			f = open(str(windows_pwd) + Dir +"\\" + str(Log_Check))
 			lines = f.read()
 			occurances=0
 			
 			#Grab a word to search on, count total occurances in file and add to Occurances_Summary
-			for word in words:
-				occurances=lines.count(word)
-				Occurances_Summary.append(str(Log_Check)+ " --- "+str(word)+' --- '+str(occurances))
-				
+			#for word in words:
+			occurances=lines.count(words)
+			Occurances_Summary.append(str(Log_Check)+ " --- "+str(words)+' --- '+str(occurances))
+			
 
-				#Divide the file into lines and check if it contains the word of interest	
-				for line in lines.split('\n'):
-					if word in line:
+			#Divide the file into lines and check if it contains the word of interest	
+			for line in lines.split('\n'):
+				if words in line:
 
-						#Output successful matches to various places 
-						print(Log_Check + " ---- "+ line + "\n")
-						#LoggingFile.write(Log_Check + " ---- "+ line + "\n")
-						#Health_LoggingFile.write(Log_Check + " ---- "+ line + "\n")
-					else:
-						pass
+					#Output successful matches to various places 
+					print(Log_Check + " ---- "+ line + "\n")
+					directory_search_output.append(line)
+					#Health_LoggingFile.write(Log_Check + " ---- "+ line + "\n")
+				else:
+					pass
 
 
 
@@ -225,7 +257,7 @@ wb=load_workbook('formatted.xlsx')
 ws = wb.active
 ws.title='nicko'
 
-LoggingFile = open(pwd + "\\script_output\\Logging_" + os.path.basename(__file__) + ".txt" , "w")
+
 Summary_LoggingFile = open(pwd + "\\script_output\\Summary_Logging_" + os.path.basename(__file__) + ".txt" , "w")
 
 
@@ -245,35 +277,27 @@ mkdiagpkg_out = f.read().splitlines()
 FMOSv=mkdiagpkg_out[1].split("FMOS release ")
 mkdiag_created=mkdiagpkg_out[2]
 hostname=mkdiagpkg_out[3].split(" ")[1]
-Device_Uptime_host_test=(mkdiagpkg_out[4].split("up")[1].split(",")[0])
-
-# if uptime contains mins set to one day
-
-
-if 'days' not in Device_Uptime_host_test:
-	Device_Uptime_host=1
-Device_Uptime_host=Device_Uptime_host_test.strip()
-Device_Uptime_host=Device_Uptime_host.split(" ")[0]
+Device_Uptime_host=(mkdiagpkg_out[4].split("up")[1].split(",")[0])
+Device_Uptime_host = Device_Uptime_host.strip().split(' ')[0]
 
 
+if 'min' in Device_Uptime_host:
+	Device_Uptime_host_days=1
+else:
+	Device_Uptime_host_days=Device_Uptime_host
 
-#elif 'days' in Device_Uptime_host_test:
-#	Device_Uptime_host=int(Device_Uptime_host_test.split(" days")[0])
 
-print('nick')
-print(Device_Uptime_host)
 
-# UpT=mkdiagpkg_out[4].split("up ")
+
 FMOSv=FMOSv[1]
 short_FMOSv = FMOSv[:-2]
 
-# UpT=UpT[1].split(",")
-# UpT=str(UpT[0]) +" "+str(UpT[1])
+
 
 print("MKDIAG Generated: " + str(mkdiag_created))
 print("FMOS Hostname: " + str(hostname))
 print("FMOS Version: " + str(FMOSv))
-print("Uptime: " + str(Device_Uptime_host_test))
+print("Uptime: " + str(Device_Uptime_host_days) + " day(s)")
 print()
 if int(Device_Uptime_host) > int(Device_Uptime):
 	print("WARNING -- Device Uptime is greater than " + str(Device_Uptime)+ " days.")
@@ -287,11 +311,7 @@ print("Closing mkdiagpkg.out")
 f.close()
 print(formatter)
 
-LoggingFile.write("Opening mkdiagpkg.out")
-LoggingFile.write('\n' +"FMOS Version: " + mkdiagpkg_out[1])
-LoggingFile.write('\n' +"Uptime: " + mkdiagpkg_out[4])
-LoggingFile.write('\n' +"Closing mkdiagpkg.out")
-LoggingFile.write(formatter)
+
 
 
 
@@ -419,9 +439,15 @@ print("Begining Directory Searches")
 print()
 
 
+if len(Health_Search_Criteria)==0 and len(ssl_access_Search_Criteria) ==0 and len(ndexec_Search_Criteria)==0:
+	print('---- No Directory Searches Requested ----')
+
+
+#print(Search_Dirs)
 
 
 for Search_Dir in Search_Dirs:
+	#print(Search_Dir)
 	if 'fmos' in Search_Dir:
 		DirF=Search_Dir
 		LogF=Health_File_Name
@@ -434,8 +460,38 @@ for Search_Dir in Search_Dirs:
 		DirF=Search_Dir
 		LogF=ndexec_File_Name
 		WordsF=ndexec_Search_Criteria
+	elif 'wf' in Search_Dir:
+		DirF=Search_Dir
+		LogF=wf_File_Name
+		WordsF=wf_Search_Criteria
+	elif 'sm' in Search_Dir:
+		DirF=Search_Dir
+		LogF=secmgr_File_Name
+		WordsF=secmgr_Search_Criteria
+	elif 'elasticsearch' in Search_Dir:
+		DirF=Search_Dir
+		LogF=es_File_Name
+		WordsF=es_Search_Criteria
+	elif 'messages' in Search_Dir:
+		DirF=Search_Dir
+		LogF=messages_file_name
+		WordsF=messages_Search_Criteria
+	# elif 'nd' in Search_Dir:
+	# 	DirF=Search_Dir
+	# 	LogF=ndexec_File_Name
+	# 	WordsF=ndexec_Search_Criteria
 
-	directory_search(str(windows_pwd), DirF, LogF, WordsF)
+
+
+
+
+	print(WordsF)
+	for Words101 in WordsF:
+		print(Words101)
+		directory_search(str(windows_pwd), DirF, LogF, Words101)
+
+
+print()
 print("Completed Directory Searches")
 print(formatter)
 
@@ -514,9 +570,17 @@ try:
 		for line in metrics:
 			if "messagesDropped" in line:
 				messagesDropped_list.append(line)
+			elif "messageParsingErrors" in line:
+				messageParsingErrors_list.append(line)
 			else:
 				pass
+		
+		bad_syslog_summary = "PASS -- No Evidence Of Bad Syslog Found"
+		for item in messageParsingErrors_list:
+			if '0' not in item:
+				bad_syslog_summary = "WARNING -- Evidence Of Bad Syslog Found - Check \\var\\log\\firemon\\dc\\metrics.log"
 
+		print(bad_syslog_summary)
 
 		for item in messagesDropped_list:
 			item=item.split(':')
@@ -537,9 +601,13 @@ try:
 			Drops_Summary="PASS -- No Evidence Of Dropped Packets Found"
 
 		print(Drops_Summary)
+
 	else:
 		Drops_Summary="N/A -- Dropped Packets Check not performed. No DC element to MKDIAG"
 		print(Drops_Summary)
+		bad_syslog_summary="N/A -- Bad Syslog Check not performed. No DC element to MKDIAG"
+		print(bad_syslog_summary)
+
 
 	print()
 	print("Closing metrics.log")
@@ -561,58 +629,67 @@ try:
 	print("Start of performing Global Search")
 	print()
 
+
+
 	if len(global_search) > 0:
 		print(', '.join(global_search))
 
-	for gs in global_search:
-		print('Looking for '+str(gs))
-		print()
-		for dirpath, subdirs, files in os.walk(".", topdown=True):
-		    for x in files:
-		    	all_files_full_path.append(os.path.join(dirpath, x))
+
+
+		for gs in global_search:
+			print('Looking for '+str(gs))
+			print()
+			for dirpath, subdirs, files in os.walk(".", topdown=True):
+			    for x in files:
+			    	all_files_full_path.append(os.path.join(dirpath, x))
 
 
 
-		for name in all_files_full_path:
-			if 'mkdiag_script_config_v1.ini'in name:
-				pass
-			else:
-				try:
-
-					f = open(name)
-					lines = f.readlines()
-					for line in lines:
-						if gs in line:
-							global_search_count=global_search_count+1
-							print(name)
-							total_finds.append(name)
-							print(line)
-
-				except:
-					unread.append(name)
-
-
-
-		i=1
-		while i < 10:
-			i=i+1
-			for unreadable in unread:
-				try:
-					f = open(unreadable, encoding="utf8")
-					fc = f.readlines()
-					for line in lines:
-						if gs in line:
-							global_search_count=global_search_count+1
-							print(line)
-					unread.remove(unreadable)
-				except:
+			for name in all_files_full_path:
+				if 'mkdiag_script_config_v1.ini'in name:
 					pass
-	print()
-	print()
-	total_finds = list(dict.fromkeys(total_finds))
-	print(', '.join(total_finds))
-	print()
-	print()
+				else:
+					try:
+
+						f = open(name)
+						lines = f.readlines()
+						for line in lines:
+							if gs in line:
+								global_search_count=global_search_count+1
+								print(name)
+								total_finds.append(name)
+								print(line)
+
+					except:
+						unread.append(name)
+
+
+
+			i=1
+			while i < 10:
+				i=i+1
+				for unreadable in unread:
+					try:
+						f = open(unreadable, encoding="utf8")
+						fc = f.readlines()
+						for line in lines:
+							if gs in line:
+								global_search_count=global_search_count+1
+								print(line)
+						unread.remove(unreadable)
+					except:
+						pass
+		print()
+		print()
+		total_finds = list(dict.fromkeys(total_finds))
+		print(', '.join(total_finds))
+		print()
+		print()
+	
+	else:
+		print('---- No Global Search Requested ----')
+		print()
+
 	print("End of performing Global Search")
 
 except Exception as e:
@@ -631,93 +708,105 @@ print(formatter)
 
 try:
 
-    print("Opening Top")
-    print()
-    f = open(str(windows_pwd) +"\\top.txt")
-    top = f.read()
+	print("Opening Top")
+	print()
+	f = open(str(windows_pwd) +"\\top.txt")
+	top = f.read()
+	line = top.split('\n')
 
-    line = top.split('\n')
-    print(line[0])
-    cpu_loadavg_1=line[0].split('average: ')[1].split(',')[0]
-    cpu_loadavg_5=line[0].split('average: ')[1].split(',')[1].strip()
-    cpu_loadavg_15=line[0].split('average: ')[1].split(',')[2].strip()
-    MiB_Mem=line[3]
+	cpu_loadavg_1=line[0].split('average: ')[1].split(',')[0]
+	cpu_loadavg_5=line[0].split('average: ')[1].split(',')[1].strip()
+	cpu_loadavg_15=line[0].split('average: ')[1].split(',')[2].strip()
 
-    print(cpu_loadavg_15)
-    MiB_Swap=line[4]
+	MiB_Mem_clean=line[3]
+	MiB_Swap_clean=line[4]
 
-    #MiB Mem
+	# print(MiB_Mem_clean)
+	# print(MiB_Swap_clean)
 
-
-    MiB_Mem=MiB_Mem.split(" ")
-    MiB_Mem_total=int(float(MiB_Mem[4]))
-    MiB_Mem_used=int(float(MiB_Mem[12]))
-
-    mem_pc = int(float(MiB_Mem_used /MiB_Mem_total *100))
+	MiB_Mem_free=MiB_Mem_clean.split(" free")[0]
+	MiB_Mem_free=MiB_Mem_free.split(" ")[-1]
+	MiB_Mem_free=int(float(MiB_Mem_free))
 
 
-    print('The total physical memory in use is '+str(mem_pc) +'%.')
-
-    MiB_Mem_total_90pc = int(float(MiB_Mem_total / 100 * 90))
-    if MiB_Mem_used > MiB_Mem_total_90pc:
-        print("WARNING -- greater than 90% of total physical memory is in use")
+	MiB_Mem_total=MiB_Mem_clean.split(" total")[0]	
+	MiB_Mem_total=MiB_Mem_total.split(" ")[-1]
+	MiB_Mem_total=int(float(MiB_Mem_total))
 
 
 
-    print()
+	mem_total_used = int(float(MiB_Mem_total - MiB_Mem_free))
+	mem_total_used_gb=round(mem_total_used/1000)
+	mem_pc=float(mem_total_used / MiB_Mem_total ) *100
+	print('The total physical memory in use is '+str(mem_total_used_gb)+'GB, that\'s approx '+str(int(mem_pc)) +'%.')
+	print()
 
-    #Swap Mem
-
-    MiB_Swap=MiB_Swap.split(" ")
-    MiB_Swap_used=int(float(MiB_Swap[12]))
-
-    if MiB_Swap_used > 0:
-        print("WARNING -- Swap Memory in use")
-
-
-    print()
-
-    #CPU
-    cpu_des=line[6]
-
-    newlist=[]
-    newlist.append(line[7:])
-
-    for item in newlist[0]:
-        all_ent=[]
-        item2=item.split(" ")
-        for items in item2:
-            if items != "":
-                all_ent.append(items)
-        try:
-            cpu_usage=int(float(all_ent[8]))
-        except:
-            pass
+	top_memory_summary="PASS -- Less Than 90% Of Total Memory In Use"
+	
+	if mem_pc > 90:
+	    top_memory_summary="WARNING -- Greater Than 90% Of Total Memory In Use"
+	print(top_memory_summary)
 
 
+	print()
 
-        if cpu_usage > 85:
-            summary_cpu.append(item)
-            summary_cpu_count+=1
-            #print(item)
-        else:
-            pass
+	#Swap Mem
 
-    if summary_cpu_count > 0:
-        summary_cpu_text="WARNING -- The following processes are using 85% CPU or more"
-        print(summary_cpu_text)
-        print(cpu_des)
-        for process in summary_cpu:
-            print(process)
-    else:
-        summary_cpu_text="PASS -- Top does not show excessive CPU usage"
-        print(summary_cpu_text)
-    print()
-    print("Closing Top")
+	MiB_Swap_used=MiB_Swap_clean.split(" used")[0]
+	MiB_Swap_used=MiB_Swap_used.split(" ")[-1]
+	MiB_Swap_used=(float(MiB_Swap_used)/1000)
+	MiB_Swap_used=round(MiB_Swap_used)
+
+
+	top_swap_summary= "PASS -- Swap Memory Not In Use"
+	if MiB_Swap_used > 0:
+	    top_swap_summary="WARNING -- Swap Memory In Use, Approx " +str(MiB_Swap_used)+'GB'
+	print(top_swap_summary)
+
+	print()
+
+	#CPU
+	cpu_des=line[6]
+
+	newlist=[]
+	newlist.append(line[7:])
+
+	for item in newlist[0]:
+	    all_ent=[]
+	    item2=item.split(" ")
+	    for items in item2:
+	        if items != "":
+	            all_ent.append(items)
+	    try:
+	        cpu_usage=int(float(all_ent[8]))
+	    except:
+	        pass
+
+
+
+	    if cpu_usage > 85:
+	        summary_cpu.append(item)
+	        summary_cpu_count+=1
+	        #print(item)
+	    else:
+	        pass
+
+	if summary_cpu_count > 0:
+	    summary_cpu_text="WARNING -- The Processes Are Using 85% CPU Or More"
+	    print(summary_cpu_text)
+	    print(cpu_des)
+	    for process in summary_cpu:
+	        print(process)
+	else:
+		summary_cpu_text="PASS -- Top Does Not Show Excessive CPU Usage"
+		print(summary_cpu_text)
+	print()
+	print("Closing Top")
 
 
 except Exception as e:
 	print(e)
+	print()
 	print("Error reading Top")
 
 print(formatter)
@@ -816,11 +905,12 @@ except Exception as e:
 
 print("Beginning to parse sm-diagpkg.json")
 print()
-License_Allocation=int(Percentage_of_Licences_Allocated[0])
 
 
 
 try:
+	License_Allocation=int(Percentage_of_Licences_Allocated[0])
+
 
 	r=open('sm-diagpkg.json')
 	f = json.load(r)
@@ -927,6 +1017,7 @@ except Exception as e:
 
 print("Checking Certificate Expiry Dates")
 print()
+
 days_till_expiry=int(Days_Until_Certificates_Expire[0])
 
 
@@ -941,27 +1032,28 @@ try:
 			display_name = 'FMOS Ecosystem Root CA'
 		elif cert_name =='fmos-admin.cer':
 			display_name = 'FMOS Control Panel'
-
-		with open(windows_pwd +cert, "r") as my_cert_file:
-				my_cert_text = my_cert_file.read()
-				cert = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM, my_cert_text)
-
-
-
-				exp_date=datetime.strptime(cert.get_notAfter().decode('ascii'), '%Y%m%d%H%M%SZ')
-				#exp_date2=datetime.strptime(exp_date, '%Y-%m-%d')
-				today=datetime.today().strftime('%Y-%m-%d')
+		try:
+			with open(windows_pwd +cert, "r") as my_cert_file:
+					my_cert_text = my_cert_file.read()
+					cert = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM, my_cert_text)
 
 
-				print(cert_name)
-				print(display_name)
-				print('Expires: '+str(exp_date))
-				delta = exp_date - datetime.today()
-				print('Days till expiry: '+str(delta.days))
-				if days_till_expiry >= delta.days:
-					warn_expire+=1
-				print()
 
+					exp_date=datetime.strptime(cert.get_notAfter().decode('ascii'), '%Y%m%d%H%M%SZ')
+					#exp_date2=datetime.strptime(exp_date, '%Y-%m-%d')
+					today=datetime.today().strftime('%Y-%m-%d')
+
+
+					print(cert_name)
+					print(display_name)
+					print('Expires: '+str(exp_date))
+					delta = exp_date - datetime.today()
+					print('Days till expiry: '+str(delta.days))
+					if days_till_expiry >= delta.days:
+						warn_expire+=1
+					print()
+		except:
+			pass
 
 
 	if warn_expire > 0:
@@ -969,7 +1061,7 @@ try:
 		print(Sumarry_Cert)
 		print()
 	else:
-		Sumarry_Cert=('PASS -- Certificate Expiry Date Not Soon')
+		Sumarry_Cert=('PASS -- Certificate Expiry Date Greater Than '+ str(days_till_expiry) +' Days')
 		print(Sumarry_Cert)
 		print()
 		print()
@@ -1000,17 +1092,20 @@ try:
 	f = open(str(windows_pwd) +"\\etc\\firemon\\fm_roles")
 	fm_role = f.readlines()
 
+	if len(fm_role) == 1:
+		device="DC only"
+
+
 
 	if '0' in fm_role[0]  and '1' in fm_role[1] and '1' in fm_role[2] and '1' in fm_role[3] and '1' in fm_role[4]:
 		device="AS and DB"
-	elif '1' in fm_role[0]  and '0' in fm_role[1] and '0' in fm_role[2] and '0' in fm_role[3] and '0' in fm_role[4]:
-		device="DC only"
 	elif '0' in fm_role[0]  and '1' in fm_role[1] and '0' in fm_role[2] and '0' in fm_role[3] and '0' in fm_role[4]:
 		device="AS only"
 	elif '0' in fm_role[0]  and '0' in fm_role[1] and '1' in fm_role[2] and '0' in fm_role[3] and '0' in fm_role[4]:
 		device="DB only"
 	elif '1' in fm_role[0]  and '1' in fm_role[1] and '1' in fm_role[2] and '1' in fm_role[3] and '1' in fm_role[4]:
 		device="All in One"
+
 
 
 	print(device)
@@ -1045,15 +1140,15 @@ try:
 	for line in cpu_info:
 		if 'processor	: ' in line:
 			cpu_count += 1
+	print('No of CPUs found '+str(cpu_count))
+	print()
+	print()
 
 	cpuload=[['1',cpu_loadavg_1],['5',cpu_loadavg_5],['15',cpu_loadavg_15]]
 	print(tabulate(cpuload, headers=['Time Mins', 'CPU Load Avg']))
-	# print('Number of Processors: '+str(cpu_count))
-	# print('CPU Load Average 1min: '+str(cpu_loadavg_1))
-	# print('CPU Load Average 5min: '+str(cpu_loadavg_5))
-	# print('CPU Load Average 15mins: '+str(cpu_loadavg_15))
+
 	
-	# cpu_info_xls=[cpu_count,cpu_loadavg_1,cpu_loadavg_5,cpu_loadavg_15]
+	cpu_info_xls=[cpu_count,cpu_loadavg_1,cpu_loadavg_5,cpu_loadavg_15]
 	# print(cpu_info_xls)
 
 	print()
@@ -1065,6 +1160,131 @@ except Exception as e:
 	print("Error Checking CPU's")
 	print()
 	print(formatter)
+
+#======================================================================================================================================================
+#======================================================================================================================================================
+
+
+
+#======================================================================================================================================================
+#======================================================================================================================================================
+
+# dc.conf
+
+print("Checking dc.conf file")
+print()
+try:
+
+
+	f = open(str(windows_pwd) +"\\etc\\firemon\\dc.conf")
+	dc_conf = f.readlines()
+	for line in dc_conf:
+		if "--DataCollector.SyslogServer.ThreadNumberForProcessingMessages" in line:
+			print(line)
+			line=line.split(" ")[1]
+			cpu_minus_one = cpu_count-1
+			if line != cpu_minus_one:
+				Sumarry_CPU=('WARNING -- Review Thread Number For Processing Messages')
+				print(Sumarry_CPU)
+			else:
+				Sumarry_CPU=('PASS -- Thread Number For Processing Messages is set correctly')
+				print(Sumarry_CPU)
+	
+
+	print()
+	print("Closing Check of dc.conf file")
+	print(formatter)
+
+except Exception as e:
+	print(e)
+	print("Error Checking dc.conf file")
+	print()
+	print(formatter)
+
+#======================================================================================================================================================
+#======================================================================================================================================================
+
+# Java heap size
+
+print("Checking Java heap size")
+print()
+try:
+	if os.path.exists(str(windows_pwd) +"\\etc\\firemon\\sm.jvm.options"):
+
+		r=open(str(windows_pwd) +"\\etc\\firemon\\sm.jvm.options")
+		s=open(str(windows_pwd) +"\\etc\\firemon\\wf.jvm.options")
+		t=open(str(windows_pwd) +"\\etc\\firemon\\nd.jvm.options")
+
+		
+		sm = r.readlines()
+		nd = s.readlines()
+		wf = t.readlines()
+
+		print('SM '+str(sm[3].split('mx')[1]))
+		print('WF '+str(wf[3].split('mx')[1]))
+		print('ND '+str(nd[3].split('mx')[1]))
+		print()
+		
+		print(formatter)
+
+	else:
+		print('This device is a ' + str(device) + ' therefore no Java heap size files present')
+		print()
+		print("Closing Check for Java heap size")
+		print(formatter)
+
+except Exception as e:
+	print(e)
+	print("Error Checking Java heap size")
+	print()
+	print(formatter)
+
+#======================================================================================================================================================
+#======================================================================================================================================================
+
+# Detailed Health check
+
+print("Checking Health")
+print()
+
+DirF="\\var\\log\\fmos"
+LogF=Health_File_Name
+WordsF2=Health_Search_Criteria
+
+for WordsF in WordsF2:
+	print(WordsF)
+	directory_search(str(windows_pwd), DirF, LogF, WordsF)
+
+# try:
+# 	r=open(str(windows_pwd) +"\\var\\log\\fmos")
+# 	#r=open('sm-diagpkg.json')
+
+# 	device_totals=[]
+# 	device_type3 = list(set(device_type2))
+# 	# for line in device_type2:
+# 	# 	print(line)
+
+
+# 	for item in device_type3:		
+# 		x=device_type2.count(item)
+# 		emptylist=[] 		
+# 		emptylist.append(item)
+# 		emptylist.append(x)
+# 		device_totals.append(emptylist)
+
+
+# 	device_totals.sort(key = lambda x: x[1])
+# 	print(tabulate(device_totals, headers=['Device', 'Count']))
+
+# 	print()
+# 	print("Closing Check for Off Box Backup")
+# 	print(formatter)
+
+# except Exception as e:
+# 	print(e)
+# 	print("Error Checking for Off Box Backup")
+# 	print()
+# 	print(formatter)
 
 #======================================================================================================================================================
 #======================================================================================================================================================
@@ -1103,94 +1323,141 @@ except Exception as e:
 #======================================================================================================================================================
 #======================================================================================================================================================
 
-# dc.conf
+# retrievalReport Review
 
-print("Checking dc.conf file")
+print("Opening retrievalReport")
 print()
 try:
+	if os.path.exists(str(windows_pwd) +"\\var\\log\\firemon\\dc\\reports\\retrievalReport.txt"):
 
+		f = open(str(windows_pwd) +"\\var\\log\\firemon\\dc\\reports\\retrievalReport.txt", encoding="utf8")
+		retrievalReport = f.readlines()
+		Sumarry_retrievalReport=('PASS -- No Failed Retrievals found in the retrievalReport')
+		for line in retrievalReport:
 
-	f = open(str(windows_pwd) +"\\etc\\firemon\\dc.conf")
-	dc_conf = f.readlines()
-	for line in dc_conf:
-		if "--DataCollector.SyslogServer.ThreadNumberForProcessingMessages" in line:
-			print(line)
-			line=line.split(" ")[1]
-			print(line)
-			print("CPU's:")
-			print(cpu_count)
-			cpu_minus_one = cpu_count-1
-			print("minus1: " +str(cpu_minus_one))
-			if line != cpu_minus_one:
-				print('warn')
-		else:
-			pass
+			if 'Failed' in line:
+				Sumarry_retrievalReport=('WARNING -- Failed Retrievals found in the retrievalReport')
+				
+		
+		print(Sumarry_retrievalReport)
+
+	else:
+		Sumarry_retrievalReport="N/A -- retrievalReport Check not performed. No DC element to MKDIAG"
+		print(Sumarry_retrievalReport)
 
 	
 
 	print()
-	print("Closing Check of dc.conf file")
+	print("Closing Check for retrievalReport")
 	print(formatter)
 
 except Exception as e:
 	print(e)
-	print("Error Checking dc.conf file")
+	print("Error Checking for retrievalReport")
 	print()
 	print(formatter)
 
 #======================================================================================================================================================
 #======================================================================================================================================================
 
-# Java heap size
+# # syslogMessagesReport Review
 
-print("Checking Java heap size")
-print()
-try:
-
-	r=open(str(windows_pwd) +"\\etc\\firemon\\sm.jvm.options")
-	s=open(str(windows_pwd) +"\\etc\\firemon\\wf.jvm.options")
-	t=open(str(windows_pwd) +"\\etc\\firemon\\nd.jvm.options")
-
-	
-	sm = r.readlines()
-	nd = s.readlines()
-	wf = t.readlines()
-
-	print('SM '+str(sm[3].split('mx')[1]))
-	print('WF '+str(wf[3].split('mx')[1]))
-	print('ND '+str(nd[3].split('mx')[1]))
-	print()
-	print("Closing Check for Java heap size")
-	print(formatter)
-
-except Exception as e:
-	print(e)
-	print("Error Checking Java heap size")
-	print()
-	print(formatter)
-
-#======================================================================================================================================================
-#======================================================================================================================================================
-
-# Syslog information
-
-# print("Checking for Off Box Backup")
+# print("Opening syslogMessagesReport")
 # print()
 # try:
+# 	if os.path.exists(str(windows_pwd) +"\\var\\log\\firemon\\dc\\reports\\syslogMessagesReport.txt"):
 
-# 	r=open('sm-diagpkg.json')
+# 		f = open(str(windows_pwd) +"\\var\\log\\firemon\\dc\\reports\\syslogMessagesReport.txt", encoding="utf8")
+# 		syslogMessagesReport = f.readlines()
+# 		Sumarry_retrievalReport=('PASS -- No Failed Retrievals found in the syslogMessagesReport')
+# 		for line in syslogMessagesReport:
+# 			'''
+# 			add the line to a new file list until  Unrecognized Devices: is seen then break
+# 			go though that new list and drop pop every line  without device id slash
+# 			get the device ID and other total from any line where the last number is not 0
+# 			'''
+# 			if 'Failed' in line:
+# 				Sumarry_retrievalReport=('WARNING -- Failed Retrievals found in the syslogMessagesReport')
+				
+		
+# 		print(Sumarry_retrievalReport)
+
+# 	else:
+# 		Sumarry_retrievalReport="N/A -- retrievalReport Check not performed. No DC element to MKDIAG"
+# 		print(Sumarry_retrievalReport)	
 
 	
 
 # 	print()
-# 	print("Closing Check for Off Box Backup")
+# 	print("Closing Check for syslogMessagesReport")
 # 	print(formatter)
 
 # except Exception as e:
 # 	print(e)
-# 	print("Error Checking for Off Box Backup")
+# 	print("Error Checking for syslogMessagesReport")
 # 	print()
 # 	print(formatter)
+
+#======================================================================================================================================================
+#======================================================================================================================================================
+
+# FireMon Data
+
+print("Opening FireMon-Data.txt File")
+print()
+try:
+	if os.path.exists(str(windows_pwd) +"\\firemon-data.txt"):
+		todaysdate2ago=datetime.today() - timedelta(days=12)
+		todaysdate2ago=str(todaysdate2ago).split(' ')[0]
+		print('Looking for a Backup from '+todaysdate2ago)
+		print()
+		backuplist=[]
+		backuplistsm=[]
+		f = open("firemon-data.txt")
+		retrievalReport2 = f.readlines()
+
+		
+		Current_Backup_Summary=('WARNING -- No Backup Found With Current Date Stamp')
+		for line in retrievalReport2:
+
+			if '.backup' in line:
+				backuplist.append(line)
+				if todaysdate2ago in line:
+					Current_Backup_Summary=('PASS -- A Backup Found With Current Date Stamp')
+					print(line)
+				
+
+		print(Current_Backup_Summary)
+
+
+
+				
+		# for nex in backuplist[-10:]:
+		# 	nex=nex.split('fmbackup')[1].split('+')[0].split('	')
+
+		# 	nex.pop(0)
+		# 	print(nex)
+		# 	if todaysdate2ago in nex:
+		# 		print(nex)
+
+
+
+
+
+	else:
+		print()
+
+	
+
+	print()
+	print("Closing FireMon-Data.txt File")
+	print(formatter)
+
+except Exception as e:
+	print(e)
+	print("Error Checking FireMon-Data.txt File")
+	print()
+	print(formatter)
 
 #======================================================================================================================================================
 #======================================================================================================================================================
@@ -1235,146 +1502,172 @@ print()
 
 
 print(formatter)
-Summary_LoggingFile.write(formatter +'\n')
 print()
 
 
 print("Summary Section")
-Summary_LoggingFile.write("Summary Section")
 print(formatter)
-Summary_LoggingFile.write(formatter +'\n'+'\n' +'\n')
+
  
 print()
 print('General Info:')
-Summary_LoggingFile.write('General Info:' +'\n' +'\n' )
 print()
 
 summary_list=[]
 summary_list2=[]
 
-# print("Customer: " + str(comp_name))
-# summary_list.append("Customer: " + str(comp_name))
-# Summary_LoggingFile.write("Customer: " + str(comp_name) +'\n')
 
 print("Server Hostname: " + str(hostname))
 summary_list.append("Server Hostname: " + str(hostname))
-Summary_LoggingFile.write("Server hostname: " + str(hostname) +'\n')
+
 
 print("FMOS Version: " + str(FMOSv))
 summary_list.append("FMOS Version: " + str(FMOSv))
-Summary_LoggingFile.write("FMOS Version: " + str(FMOSv) +'\n')
+
 
 print("Server Role: "+str(device))
 summary_list.append("Server Role: "+str(device))
-Summary_LoggingFile.write('Server Role: '+str(device)+'\n')
 
-print("Uptime: " + str(UpT))
-summary_list.append("Uptime: " + str(UpT))
-Summary_LoggingFile.write("Uptime: " + str(UpT)+'\n')
+
+print("Uptime: " + str(Device_Uptime_host_days) + ' day(s)')
+summary_list.append("Uptime: " + str(Device_Uptime_host_days) + ' day(s)')
+
 
 if Check_Installed_DPs =="N/A -- Device Packs Check not performed. No DC element to MKDIAG":
 	pass
 else:
 	print("Devices found (deviceInventoryReport): " + str(int(Total_Devices)))
-	Summary_LoggingFile.write("Devices found (deviceInventoryReport): " + str(int(Total_Devices))+'\n')
+	
 
-print("Devices found (sm_diagpkg): " + str(device_count))
-Summary_LoggingFile.write("Devices found (sm_diagpkg): " + str(device_count) +'\n')
+if device=="DC only":
+	pass
+else:
+	print("Devices found (sm_diagpkg): " + str(device_count))
+	
 
 print("MKDIAG Created: " + str(mkdiag_created))
 summary_list.append("MKDIAG Created: " + str(mkdiag_created))
-Summary_LoggingFile.write("MKDIAG Created: " + str(mkdiag_created) +'\n')
-
-
 
 print()
 print(formatter)
-Summary_LoggingFile.write(formatter +'\n')
 
 
 #======================================================================================================================================================
 #======================================================================================================================================================
 
 # Writing Checks Carried Out
-# 
+ 
 print()
 print('Checks carried out:')
-
-Summary_LoggingFile.write('Checks carried out:' +'\n'+'\n')
 print()
 
-print(Check_Installed_DPs)
-summary_list2.append(Check_Installed_DPs)
-Summary_LoggingFile.write(Check_Installed_DPs+'\n')
+try:
+	print(Check_Installed_DPs)
+	summary_list2.append(Check_Installed_DPs)
+except:
+	pass
 
-print(Drops_Summary)
-summary_list2.append(Drops_Summary)
-Summary_LoggingFile.write(Drops_Summary+'\n')
 
-print(Core_Summary)
-summary_list2.append(Core_Summary)
-Summary_LoggingFile.write(Core_Summary+'\n')
+try:
+	print(Drops_Summary)
+	summary_list2.append(Drops_Summary)
+except:
+	pass
 
-print(Backup_Summary)
-summary_list2.append(Backup_Summary)
-Summary_LoggingFile.write(Backup_Summary+'\n')
 
-print(License_Summary)
-summary_list2.append(License_Summary)
-Summary_LoggingFile.write(License_Summary+'\n')
+try:
+	print(bad_syslog_summary)
+	summary_list2.append(bad_syslog_summary)
+except:
+	pass
 
-print(Norm_Ret_Summary)
-summary_list2.append(Norm_Ret_Summary)
-Summary_LoggingFile.write(Norm_Ret_Summary+'\n')
 
-print(Sumarry_Cert)
-summary_list2.append(Sumarry_Cert)
-Summary_LoggingFile.write(Sumarry_Cert+'\n')
+try:
+	print(Core_Summary)
+	summary_list2.append(Core_Summary)
+except:
+	pass
 
-print(Summary_Dir_Check)
-summary_list2.append(Summary_Dir_Check)
-Summary_LoggingFile.write(Summary_Dir_Check+'\n')
 
-print(Check_Device_Uptime)
-summary_list2.append(Check_Device_Uptime)
-Summary_LoggingFile.write(Check_Device_Uptime+'\n')
+try:
+	print(top_memory_summary)
+	summary_list2.append(top_memory_summary)
+except:
+	pass
 
+
+try:
+	print(top_swap_summary)
+	summary_list2.append(top_swap_summary)
+except:
+	pass
+
+
+try:
+	print(summary_cpu_text)
+	summary_list2.append(summary_cpu_text)
+except:
+	pass
+
+
+try:
+	print(Backup_Summary)
+	summary_list2.append(Backup_Summary)
+except:
+	pass
+
+
+if device=="DC only":
+	pass
+else:
+	print(License_Summary)
+	summary_list2.append(License_Summary)
+	
+
+
+if device=="DC only":
+	pass
+else:
+	print(Norm_Ret_Summary)
+	summary_list2.append(Norm_Ret_Summary)
+
+
+try:
+	print(Sumarry_Cert)
+	summary_list2.append(Sumarry_Cert)
+except:
+	pass
+
+
+try:
+	print(Summary_Dir_Check)
+	summary_list2.append(Summary_Dir_Check)
+except:
+	pass
+
+
+try:
+	print(Check_Device_Uptime)
+	summary_list2.append(Check_Device_Uptime)
+except:
+	pass
+
+
+try:
+	print(Sumarry_CPU)
+	summary_list2.append(Sumarry_CPU)
+except:
+	pass
+
+
+try:
+	print(Sumarry_retrievalReport)
+	summary_list2.append(Sumarry_retrievalReport)
+except:
+	pass
 
 
 print(formatter)
-Summary_LoggingFile.write(formatter +'\n'+'\n')
-# 
-# 
-# 
-
-print()
-
-print()
-print('Certificate Info:')
-
-Summary_LoggingFile.write('Checks carried out:' +'\n'+'\n')
-print()
-
-
-
-
-
-print(formatter)
-Summary_LoggingFile.write(formatter +'\n'+'\n')
-# 
-# 
-# 
-
-print()
-
-
-
-
-
-
-
-
-
 
 
 #======================================================================================================================================================
@@ -1382,49 +1675,76 @@ print()
 
 # Writing to Excel
 
-print("Writing to Excel: "+ str(hostname.split('.')[0])+'.xlsx')
+print("Writing to Excel: ")
 print()
+print('File Name: ' + str(hostname.split('.')[0])+'.xlsx')
 try:
 
 	#for item in summary_list:
 	for i, item in enumerate(summary_list):
 		ws.cell(row=i+2, column=1).value = item
-	print('General Info written successfully')
+	print('General Info ....written successfully')
 
 	for i, item in enumerate(summary_list2):
 		ws.cell(row=i+3, column=3).value = item
-	print('Checks carried out written successfully')
+	print('Checks Carried Out ....written successfully')
 
 	for i, item in enumerate(cpu_info_xls):
 		ws.cell(row=i+4, column=6).value = item
-	print('CPU written successfully')
+	print('CPU Summary ....written successfully')
 
 
 
 	print()
 	print("Closing Writing to Excel")
+	print()
+	print("\U0001F40D")
 	print(formatter)
 
 except Exception as e:
 	print(e)
 	print("Error Writing to Excel")
 	print()
+	print()
+	print("\U0001F40D")
 	print(formatter)
 
 #======================================================================================================================================================
 #======================================================================================================================================================
 
-
-
-
-
-print()
-
-print()
+#Save and Go!
 
 wb.save(pwd + '\\script_output\\'+str(hostname.split('.')[0])+'.xlsx')
-LoggingFile.close()
 Summary_LoggingFile.close()
+
+
+print()
+
+print()
+directory_search_output_analysis=[]
+for line in directory_search_output:
+	
+	line=line.split('fmos.health')[1]
+	line=line[1::]
+	if 'checks.dc 'in line:
+		line=line.split('checks.dc ')[1]
+	else:
+		pass
+	line=line.split(' ')
+	line.remove(line[0])
+	line.remove(line[0])
+	s = " "
+	line = s.join(line)
+	if line not in directory_search_output_analysis:
+		directory_search_output_analysis.append(line)
+	else:
+		pass
+
+	
+
+for nicks in directory_search_output_analysis:
+	print(nicks)
+
 
 exit()
 
