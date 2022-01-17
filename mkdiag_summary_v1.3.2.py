@@ -1425,7 +1425,7 @@ try:
 				if todaysdate2ago in line:
 					Current_Backup_Summary=('PASS -- A Backup Found With Current Date Stamp')
 					print(line)
-				
+		print()
 
 		print(Current_Backup_Summary)
 
