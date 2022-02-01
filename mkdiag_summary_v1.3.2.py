@@ -3,7 +3,7 @@
 
 # Imports
 
-import os, configparser, json, OpenSSL
+import os, configparser, json, OpenSSL, sys, smtplib
 
 
 from datetime import datetime, timedelta
@@ -16,6 +16,7 @@ from tabulate import tabulate
 
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+
 
 
 #======================================================================================================================================================
@@ -42,6 +43,8 @@ messages_file_name='messages'
 ssl_access_Search_Criteria=[]
 ndexec_Search_Criteria=[]
 Health_Search_Criteria=[]
+stdout=[]
+email_add=[]
 es_Search_Criteria=[]
 wf_Search_Criteria=[]
 secmgr_Search_Criteria=[]
@@ -106,6 +109,15 @@ try:
 
 	config = configparser.ConfigParser()
 	config.read("mkdiag_script_config_v1.ini")
+
+	for key in config['stdout']:
+		value=config['stdout'][key]
+		stdout.append(value)
+		
+
+	for key in config['email_add']:
+		value=config['email_add'][key]
+		email_add.append(value)
 
 
 	for key in config['health']:
@@ -246,6 +258,8 @@ def directory_search(MyLoc: object, Dir: object, Log: object, words: object) -> 
 pwd=os.getcwd()
 print("Present Working Directory " + pwd)
 windows_pwd=pwd.replace('\\','\\\\')
+mkdiag_num=pwd.split('.')[-1]
+
 
 try:
 	os.mkdir(pwd + "\\script_output")
@@ -257,6 +271,10 @@ wb=load_workbook('formatted.xlsx')
 ws = wb.active
 ws.title='nicko'
 
+if 'file' in stdout:
+	sys.stdout = open('nicko.txt', 'w')	
+else:	
+	pass
 
 Summary_LoggingFile = open(pwd + "\\script_output\\Summary_Logging_" + os.path.basename(__file__) + ".txt" , "w")
 
@@ -266,52 +284,62 @@ Summary_LoggingFile = open(pwd + "\\script_output\\Summary_Logging_" + os.path.b
 
 # mkdiagpkg.out
 
-print(formatter)
+try:
+	if os.path.exists(str(windows_pwd) +"\\mkdiagpkg.out"):
 
-print("Opening mkdiagpkg.out")
-print()
-f = open("mkdiagpkg.out")
-mkdiagpkg_out = f.read().splitlines()
+		print(formatter)
 
-
-FMOSv=mkdiagpkg_out[1].split("FMOS release ")
-mkdiag_created=mkdiagpkg_out[2]
-hostname=mkdiagpkg_out[3].split(" ")[1]
-Device_Uptime_host=(mkdiagpkg_out[4].split("up")[1].split(",")[0])
-Device_Uptime_host = Device_Uptime_host.strip().split(' ')[0]
+		print("Opening mkdiagpkg.out")
+		print()
+		f = open("mkdiagpkg.out")
+		mkdiagpkg_out = f.read().splitlines()
 
 
-if 'min' in Device_Uptime_host:
-	Device_Uptime_host_days=1
-else:
-	Device_Uptime_host_days=Device_Uptime_host
+		FMOSv=mkdiagpkg_out[1].split("FMOS release ")
+		mkdiag_created=mkdiagpkg_out[2]
+		hostname=mkdiagpkg_out[3].split(" ")[1]
+		Device_Uptime_host=(mkdiagpkg_out[4].split("up")[1].split(",")[0])
+		Device_Uptime_host = Device_Uptime_host.strip().split(' ')[0]
 
 
-
-
-FMOSv=FMOSv[1]
-short_FMOSv = FMOSv[:-2]
+		if 'min' in Device_Uptime_host:
+			Device_Uptime_host_days=1
+		else:
+			Device_Uptime_host_days=Device_Uptime_host
 
 
 
-print("MKDIAG Generated: " + str(mkdiag_created))
-print("FMOS Hostname: " + str(hostname))
-print("FMOS Version: " + str(FMOSv))
-print("Uptime: " + str(Device_Uptime_host_days) + " day(s)")
-print()
-if int(Device_Uptime_host) > int(Device_Uptime):
-	print("WARNING -- Device Uptime is greater than " + str(Device_Uptime)+ " days.")
-	Check_Device_Uptime="WARNING -- Device Uptime is greater than " + str(Device_Uptime)+ " days."
-else:
-	print("PASS -- Device Uptime is less than " + str(Device_Uptime)+ " days.")
-	Check_Device_Uptime="PASS -- Device Uptime is less than " + str(Device_Uptime)+ " days."
 
-print()
-print("Closing mkdiagpkg.out")
-f.close()
-print(formatter)
+		FMOSv=FMOSv[1]
+		short_FMOSv = FMOSv[:-2]
 
 
+
+		print("MKDIAG Generated: " + str(mkdiag_created))
+		print("FMOS Hostname: " + str(hostname))
+		print("FMOS Version: " + str(FMOSv))
+		print("Uptime: " + str(Device_Uptime_host_days) + " day(s)")
+		print()
+		if int(Device_Uptime_host) > int(Device_Uptime):
+			print("WARNING -- Device Uptime is greater than " + str(Device_Uptime)+ " days.")
+			Check_Device_Uptime="WARNING -- Device Uptime is greater than " + str(Device_Uptime)+ " days."
+		else:
+			print("PASS -- Device Uptime is less than " + str(Device_Uptime)+ " days.")
+			Check_Device_Uptime="PASS -- Device Uptime is less than " + str(Device_Uptime)+ " days."
+
+
+	else:
+		print()
+		print("Closing mkdiagpkg.out")
+		f.close()
+	
+	print(formatter)
+
+except Exception as e:
+	print(e)
+	print("Error mkdiagpkg.out")
+	print()
+	print(formatter)
 
 
 
@@ -558,6 +586,7 @@ print(formatter)
 # Metrics Log
 
 try:
+
 
 	print("Opening metrics.log")
 	print()
@@ -917,6 +946,7 @@ try:
 	counter=0
 	text=""
 	Norm_Ret_counter=0
+	dc_status=0
 
 	comp_name=str(f["companyName"])
 	device_count=str(f["deviceCount"])
@@ -925,7 +955,10 @@ try:
 	print("Total Devices: "+str(device_count))
 	print()
 	print()
-	print('Using ' +str(License_Allocation)+ '% allocation and greater to fire warning')
+	print('Checking License Status')
+	print()
+	print('Using ' +str(License_Allocation)+ '% allocation or greater to alert on')
+	print()
 	for n in f['domains'][0]['licenseAllocations']:
 		categoryName=n['categoryName']
 		licenseTotal=n['licenseTotal']
@@ -987,7 +1020,38 @@ try:
 			print('Known revisions are: '+str(revisionlist))
 			print(text)
 			print()
+
+	print()
+	print('Checking DataCollector Status')
+
+	for n in f['collectors']:
+		#print(n)
+		name=n['name']
+		
+		status=n['status']
+		if status != 'UP':
+			dc_status+=1
+		print(str(name)+'	'+str(status))
+		#print(status)
+		deviceCount_dc=n['deviceCount']
+		print('deviceCount: '+ str(deviceCount_dc))	
+
+		pc_dc_allocation=(deviceCount_dc / int(device_count))*100
+		print('Percentage of total devices allocated to this DC is '+str(pc_dc_allocation))
+		print()
+
+
 	
+
+	if dc_status > 0:
+		dc_status_Summary='WARNING -- A DataCollector Status is DOWN'
+		print(dc_status_Summary)
+	else:
+		dc_status_Summary='PASS -- All DataCollectors are UP'
+		print(dc_status_Summary)
+	
+	print()
+	print('Checking for NORMALIZATION / RETRIEVAL Errors')
 
 	if Norm_Ret_counter > 0:
 		Norm_Ret_Summary='WARNING -- NORMALIZATION / RETRIEVAL Errors Found (sm-diagpkg.json)'
@@ -995,6 +1059,8 @@ try:
 	else:
 		Norm_Ret_Summary='PASS -- No NORMALIZATION / RETRIEVAL Errors Found (sm-diagpkg.json)'
 		print(Norm_Ret_Summary)
+
+
 
 
 
@@ -1667,6 +1733,18 @@ except:
 	pass
 
 
+try:
+	print(Current_Backup_Summary)
+	summary_list2.append(Current_Backup_Summary)
+except:
+	pass
+
+try:
+	print(dc_status_Summary)
+	summary_list2.append(dc_status_Summary)
+except:
+	pass
+
 print(formatter)
 
 
@@ -1698,7 +1776,10 @@ try:
 	print()
 	print("Closing Writing to Excel")
 	print()
-	print("\U0001F40D")
+	if 'screen' in stdout:
+		print("\U0001F40D")
+	else:	
+		pass
 	print(formatter)
 
 except Exception as e:
@@ -1706,7 +1787,11 @@ except Exception as e:
 	print("Error Writing to Excel")
 	print()
 	print()
-	print("\U0001F40D")
+	if 'screen' in stdout:
+		print("\U0001F40D")
+	else:	
+		pass
+
 	print(formatter)
 
 #======================================================================================================================================================
@@ -1719,6 +1804,32 @@ Summary_LoggingFile.close()
 
 
 print()
+
+
+send_from = 'MKDIAG_Review@firemon.com'
+send_to = ['nick.wilson@firemon.com']
+msg['From'] = send_from
+msg['To'] = ", ".join(send_to)
+msg['Subject'] = 'MKDIAG '+str(mkdiag_num)+' Review. Customer: '+ str(comp_name)
+
+
+body = '\n' +'\n'+ Check_Installed_DPs +'\n'+ '\n'+ Drops_Summary +'\n'+ '\n'+ bad_syslog_summary+'\n'+'\n'+ \
+ Core_Summary +'\n'+ '\n'+ top_memory_summary +'\n'+ '\n'+ top_swap_summary +'\n'+ '\n'+ summary_cpu_text +'\n'+ \
+ '\n'+ Backup_Summary +'\n'+ '\n'+ License_Summary +'\n'+ '\n'+ Norm_Ret_Summary +'\n'+ '\n'+ Sumarry_Cert +'\n'+ \
+ '\n'+ Summary_Dir_Check +'\n'+ '\n'+ Check_Device_Uptime +'\n'+ '\n'+ Sumarry_CPU +'\n'+ '\n'+ Sumarry_retrievalReport \
+ +'\n'+ '\n'+ Current_Backup_Summary +'\n'+ '\n'+ dc_status_Summary
+
+
+msg.attach(MIMEText(body, 'plain'))
+smtpObj = smtplib.SMTP('smtp.lab.firemon.com', 25)
+#http://mail.securepassage.com/
+#smtpObj = smtplib.SMTP('', 25)
+smtpObj.sendmail(send_from, send_to, msg.as_string())
+smtpObj.quit()
+
+
+
+
 
 print()
 directory_search_output_analysis=[]
@@ -1747,4 +1858,7 @@ for nicks in directory_search_output_analysis:
 
 
 exit()
+
+
+
 
